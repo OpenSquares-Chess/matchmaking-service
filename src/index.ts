@@ -28,7 +28,7 @@ async function findMatch(redisClient: RedisClientType, id: number) {
         console.error('Error connecting to Redis:', error);
     }
     const elapsed = performance.now() - now;
-    const delay = Math.max(0, 10000 - elapsed);
+    const delay = Math.max(0, 4000 - elapsed);
 
     setTimeout(async () => {
         await findMatch(redisClient, id);
@@ -50,7 +50,7 @@ async function main(id: number) {
     
     setTimeout(async () => {
         await findMatch(redisClient, id);
-    }, Math.random() * 10000);
+    }, Math.random() * 4000);
 }
 
 if (cluster.isPrimary) {
