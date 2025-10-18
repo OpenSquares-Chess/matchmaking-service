@@ -6,6 +6,16 @@ import { performance } from 'perf_hooks';
 
 type RedisClientType = ReturnType<typeof createClient>;
 
+async function getRoomKeys(redisClient: RedisClientType, roomId: string) {
+    while (true) {
+        const roomKeys = await redisClient.get(`room:${roomId}:keys`);
+        if (roomKeys) {
+            return JSON.parse(roomKeys);
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+}
+
 async function findMatch(redisClient: RedisClientType, id: number) {
     const now = performance.now();
     try {
@@ -23,13 +33,29 @@ async function findMatch(redisClient: RedisClientType, id: number) {
         if (result) {
             const [player1, player2] = result as [string, string];
             console.log(`(${id}) Match found between ${player1} and ${player2}`);
-            redisClient.publish('matchmaking:queue1', JSON.stringify({ playerId: player1, matchInfo: { player1, player2 } }));
+            const { element: roomId } = await redisClient.brPop('rooms', 0) as { key: string, element: string };
+            console.log(`(${id}) Room: ${roomId} for ${player1} and ${player2}`);
+            let roomKeys = await getRoomKeys(redisClient, roomId);
+            roomKeys.timestamp = Date.now();
+            await redisClient.set(`room:${roomId}:keys`, JSON.stringify(roomKeys));
+            let [key1, key2] = roomKeys.keys;
+            if (Math.random() < 0.5) {
+                [key1, key2] = [key2, key1];
+            }
+            redisClient.publish('matchmaking:queue1', JSON.stringify({
+                playerId: player1,
+                matchInfo: { opponentId: player2, roomId, roomKey: key1 }
+            }));
+            redisClient.publish('matchmaking:queue1', JSON.stringify({
+                playerId: player2,
+                matchInfo: { opponentId: player1, roomId, roomKey: key2 }
+            }));
         }
     } catch (error) {
         console.error('Error connecting to Redis:', error);
     }
     const elapsed = performance.now() - now;
-    const delay = Math.max(0, 4000 - elapsed);
+    const delay = Math.max(0, 1000 - elapsed);
 
     setTimeout(async () => {
         await findMatch(redisClient, id);
@@ -51,7 +77,7 @@ async function main(id: number) {
     
     setTimeout(async () => {
         await findMatch(redisClient, id);
-    }, Math.random() * 4000);
+    }, Math.random() * 1000);
 }
 
 if (cluster.isPrimary) {
