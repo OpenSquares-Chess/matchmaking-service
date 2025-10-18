@@ -23,6 +23,7 @@ async function findMatch(redisClient: RedisClientType, id: number) {
         if (result) {
             const [player1, player2] = result as [string, string];
             console.log(`(${id}) Match found between ${player1} and ${player2}`);
+            redisClient.publish('matchmaking:queue1', JSON.stringify({ playerId: player1, matchInfo: { player1, player2 } }));
         }
     } catch (error) {
         console.error('Error connecting to Redis:', error);
