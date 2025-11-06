@@ -21,20 +21,24 @@ async function findMatch(redisClient: RedisClientType, id: number) {
     try {
          const luaScript = `
             local queue = KEYS[1]
-            local length = redis.call('LLEN', queue)
-            if length < 2 then
+            local rooms = KEYS[2]
+            local queueLength = redis.call('LLEN', queue)
+            if queueLength < 2 then
+              return nil
+            end
+            local roomLength = redis.call('LLEN', rooms)
+            if roomLength < 1 then
               return nil
             end
             local player1 = redis.call('RPOP', queue)
             local player2 = redis.call('RPOP', queue)
-            return {player1, player2}
+            local room = redis.call('RPOP', rooms)
+            return {player1, player2, room}
         `;
-        const result = await redisClient.eval(luaScript, { keys: ['players'] });
+        const result = await redisClient.eval(luaScript, { keys: ['players', 'rooms'] });
         if (result) {
-            const [player1, player2] = result as [string, string];
-            console.log(`(${id}) Match found between ${player1} and ${player2}`);
-            const { element: roomId } = await redisClient.brPop('rooms', 0) as { key: string, element: string };
-            console.log(`(${id}) Room: ${roomId} for ${player1} and ${player2}`);
+            const [player1, player2, roomId] = result as [string, string, string];
+            console.log(`(${id}) Match found between ${player1} and ${player2} in room ${roomId}`);
             let roomKeys = await getRoomKeys(redisClient, roomId);
             roomKeys.timestamp = Date.now();
             await redisClient.set(`room:${roomId}:keys`, JSON.stringify(roomKeys));
@@ -42,14 +46,15 @@ async function findMatch(redisClient: RedisClientType, id: number) {
             if (Math.random() < 0.5) {
                 [key1, key2] = [key2, key1];
             }
-            redisClient.publish('matchmaking:queue1', JSON.stringify({
+            redisClient.publish('matchmaking:queue', JSON.stringify({
                 playerId: player1,
                 matchInfo: { opponentId: player2, roomId, roomKey: key1 }
             }));
-            redisClient.publish('matchmaking:queue1', JSON.stringify({
+            redisClient.publish('matchmaking:queue', JSON.stringify({
                 playerId: player2,
                 matchInfo: { opponentId: player1, roomId, roomKey: key2 }
             }));
+            redisClient.publish('matchmaking:game', roomId);
         }
     } catch (error) {
         console.error('Error connecting to Redis:', error);
@@ -64,7 +69,7 @@ async function findMatch(redisClient: RedisClientType, id: number) {
 
 async function main(id: number) {
     const redisClient = createClient({
-        url: 'redis://host.docker.internal:6379',
+        url: 'redis://localhost:6379',
     });
 
     try {
